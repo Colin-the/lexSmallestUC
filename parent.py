@@ -3,6 +3,7 @@ import networkx as nx
 from collections import deque, defaultdict
 from typing import Dict, List
 import itertools
+import math
 
 def plot_tree(
     tree: Dict[str, List[str]],
@@ -103,17 +104,16 @@ def plot_tree(
     plt.show()
 
 
-"""
-nodes = [
-    "1234", "1235", "1243", "1245", "1324", "1325", "1342", "1345", "2135", "2143", "2145", "2314", "2315",
-    "2415","3215","3425","1435","2435","1425",
-    "3145","3245","3125","4135","4215","4325",
-    "4315","4235","4125","3415","2345"
-]
-"""
+
+# nodes = [
+#     "2315",
+#     "2415","3215","3425","1435","2435","1425",
+#     "3145","3245","3125","4135","4215","4325",
+#     "4315","4235","4125","3415","2345"
+# ]
 
 nodes = [
-    "2315",
+    "1234", "1235", "1243", "1245", "1324", "1325", "1342", "1345", "2135", "2143", "2145", "2314", "2315",
     "2415","3215","3425","1435","2435","1425",
     "3145","3245","3125","4135","4215","4325",
     "4315","4235","4125","3415","2345"
@@ -142,6 +142,10 @@ def parent(node: str, n):
     # The root has no parent or it's parent is it's self
     if node == ROOT:
         return ROOT
+    if node == "2415":
+        return "2315"
+    if node == "3145":
+        return "3125"
     
     # Determine the missing number
     missingNum = missing(node, n)
@@ -167,12 +171,50 @@ def parent(node: str, n):
             return min(candidates, key=lambda x: int(x))
         return None
     else:
+        checkInv = False
         # IF the current perm does not contain 1 and is out of order
-        if missingNum == 5:
+        if missingNum == n:
             return None
-          
+        elif missingNum == n - 1:  
+            toReplace = 1
+        elif missingNum == math.ceil(n/2):
+            toReplace = n + 1
+            checkInv = True
+        else:
+            toReplace = missingNum + 1
+
+        # Try replacing m+1 with m where m is the missing symbol
         for i in range(len(node)):
-            if int(node[i]) == missingNum + 1:
+            if int(node[i]) == toReplace:
+                par = node[:i] + str(missingNum) + node[i+1:len(node)]
+
+        if missingNum == 1 or missingNum == 2:
+            return par
+        
+        # if checkInv:
+        #     # Generate the other possible parent by replacing 1 with m
+        #     # Try replacing m+1 with m where m is the missing symbol
+        #     for i in range(len(node)):
+        #         if int(node[i]) == 1:
+        #             par2 = node[:i] + str(missingNum) + node[i+1:len(node)]
+
+        #     # Now we want par or par2 depending on...?
+        
+        short = par[:len(par)-1]
+        print(short)
+        valid = True
+        for i in range(1,len(short) - 1):
+            if int(short[i]) < int(short[i+1]):
+                continue
+            else:
+                valid = False
+
+        if valid:
+            return par
+        
+
+        for i in range(len(node)):
+            if int(node[i]) == 1:
                 par = node[:i] + str(missingNum) + node[i+1:len(node)]
 
         # If we are transtioning between out and in order
@@ -269,3 +311,7 @@ if __name__ == '__main__':
     #     print(f"{parent_node!r} → {kids}")
 
     plot_tree(tree, root="2345", filename="my_tree.png")
+
+
+
+# 4325, 4315, 4215, 4235, 4135, 4125, 3125, 3425, 3415, 2415
