@@ -1,9 +1,19 @@
 import matplotlib.pyplot as plt
 import networkx as nx
 from collections import deque, defaultdict
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import itertools
 import math
+
+def lexSmallest(seq: List[int]) -> Tuple[int, ...]:
+    """
+    Return the lexicographically greatest rotation of seq.
+    """
+    k = len(seq)
+    # Build all rotations
+    rotations = (tuple(seq[i:] + seq[:i]) for i in range(k))
+    # Return the maximum one
+    return min(rotations)
 
 def plot_tree(
     tree: Dict[str, List[str]],
@@ -91,7 +101,7 @@ def plot_tree(
         G,
         pos,
         with_labels=True,
-        labels={n: n for n in all_nodes},
+        labels={n: "".join(lexSmallest(n)) for n in all_nodes},
         node_size=node_size,
         font_size=font_size,
         arrowsize=12,
@@ -130,159 +140,159 @@ def missing(node, n):
             return num
     return -1
 
-def parent(node: str, n: int):
-    """
-    Parent rule that depends only on node and n.
-    - Find last index i where int(node[i]) < missing digit m.
-    - If none, use index 0.
-    - Return the parent string (and optionally the index used and m).
-    """
-    m = missing(node, n)
-    if m is None:
-        return None  # or raise
-    # last index with digit < m, else 0
-    idx = 0
-    for i in range(len(node)-1, -1, -1):
-        if int(node[i]) < int(m):
-            idx = i
-            break
-    lst = list(node)
-    lst[idx] = str(m)
-    return "".join(lst)
+# def parent(node: str, n: int):
+#     """
+#     Parent rule that depends only on node and n.
+#     - Find last index i where int(node[i]) < missing digit m.
+#     - If none, use index 0.
+#     - Return the parent string (and optionally the index used and m).
+#     """
+#     m = missing(node, n)
+#     if m is None:
+#         return None  # or raise
+#     # last index with digit < m, else 0
+#     idx = 0
+#     for i in range(len(node)-1, -1, -1):
+#         if int(node[i]) < int(m):
+#             idx = i
+#             break
+#     lst = list(node)
+#     lst[idx] = str(m)
+#     return "".join(lst)
 
-# def parent(node: str, n):
-#     # The root has no parent or it's parent is it's self
-#     if node == ROOT:
-#         return ROOT
-#     if node == "2415":
-#         return "2315"
-#     if node == "3145":
-#         return "3125"
+def parent(node: str, n):
+    # The root has no parent or it's parent is it's self
+    if node == ROOT:
+        return ROOT
+    if node == "2415":
+        return "2315"
+    if node == "3145":
+        return "3125"
     
-#     # Determine the missing number
-#     missingNum = missing(node, n)
-#     # If there was no missing number then we have a error 
-#     # in the permutation and can't find it's parent
-#     if missingNum == -1:
-#         return None
+    # Determine the missing number
+    missingNum = missing(node, n)
+    # If there was no missing number then we have a error 
+    # in the permutation and can't find it's parent
+    if missingNum == -1:
+        return None
     
-#     if inOrder(node):
-#         candidates = []
-#         currentVal = int(node)
-#         # Try inserting the missing digit at every possible index
-#         for i in range(len(node)):
-#             cand = node[:i] + str(missingNum) + node[i+1:len(node)]
-#             #print(cand)
-#             # Only consider those greater than the current node numerically
-#             if int(cand) > currentVal:
-#                 candidates.append(cand)
+    if inOrder(node):
+        candidates = []
+        currentVal = int(node)
+        # Try inserting the missing digit at every possible index
+        for i in range(len(node)):
+            cand = node[:i] + str(missingNum) + node[i+1:len(node)]
+            #print(cand)
+            # Only consider those greater than the current node numerically
+            if int(cand) > currentVal:
+                candidates.append(cand)
 
-#         # Return the lexicographically smallest new string that is greater than
-#         # the current permutation
-#         if candidates:
-#             return min(candidates, key=lambda x: int(x))
-#         return None
-#     else:
-#         checkInv = False
-#         # IF the current perm does not contain 1 and is out of order
-#         if missingNum == n:
-#             return None
-#         elif missingNum == n - 1:  
-#             toReplace = 1
-#         elif missingNum == math.ceil(n/2):
-#             toReplace = math.ceil(n/2) + 1
-#             checkInv = True
-#         else:
-#             toReplace = missingNum + 1
+        # Return the lexicographically smallest new string that is greater than
+        # the current permutation
+        if candidates:
+            return min(candidates, key=lambda x: int(x))
+        return None
+    else:
+        checkInv = False
+        # IF the current perm does not contain 1 and is out of order
+        if missingNum == n:
+            return None
+        elif missingNum == n - 1:  
+            toReplace = 1
+        elif missingNum == math.ceil(n/2):
+            toReplace = math.ceil(n/2) + 1
+            checkInv = True
+        else:
+            toReplace = missingNum + 1
 
-#         # Try replacing m+1 with m where m is the missing symbol
-#         for i in range(len(node)):
-#             if int(node[i]) == toReplace:
-#                 par = node[:i] + str(missingNum) + node[i+1:len(node)]  
+        # Try replacing m+1 with m where m is the missing symbol
+        for i in range(len(node)):
+            if int(node[i]) == toReplace:
+                par = node[:i] + str(missingNum) + node[i+1:len(node)]  
         
-#         # if checkInv:
-#         #     # Generate the other possible parent by replacing 1 with m
-#         #     # Try replacing m+1 with m where m is the missing symbol
-#         #     for i in range(len(node)):
-#         #         if int(node[i]) == 1:
-#         #             par2 = node[:i] + str(missingNum) + node[i+1:len(node)]
+        # if checkInv:
+        #     # Generate the other possible parent by replacing 1 with m
+        #     # Try replacing m+1 with m where m is the missing symbol
+        #     for i in range(len(node)):
+        #         if int(node[i]) == 1:
+        #             par2 = node[:i] + str(missingNum) + node[i+1:len(node)]
 
-#         #     # Now we want par or par2 depending on...?
+        #     # Now we want par or par2 depending on...?
 
 
-#         if not checkInv:
-#             return par
-        
-
-#         short = par[:len(par)-1]
-
-#         valid = True
-#         for i in range(1,len(short) - 1):
-#             if int(short[i]) < int(short[i+1]):
-#                 continue
-#             else:
-#                 valid = False
-
-#         if valid:
-#             return par
+        if not checkInv:
+            return par
         
 
-#         for i in range(len(node)):
-#             if int(node[i]) == 1:
-#                 par = node[:i] + str(missingNum) + node[i+1:len(node)]
+        short = par[:len(par)-1]
 
-#         # If we are transtioning between out and in order
-#         # then we need to make sure that this is the right
-#         # time to do so
-#         if inOrder(par):
-#             # Strip out the last symbol
-#             short = par[:len(par)-1]
+        valid = True
+        for i in range(1,len(short) - 1):
+            if int(short[i]) < int(short[i+1]):
+                continue
+            else:
+                valid = False
 
-#             # Now we want the lex greatest IN order combonation
-#             # of these numbers 
-#             validInversion = True
+        if valid:
+            return par
+        
 
-#             # numb = [int(s) for s in list(short)]
-#             # numb.sort()
-#             # combs = itertools.permutations(numb, len(short))
+        for i in range(len(node)):
+            if int(node[i]) == 1:
+                par = node[:i] + str(missingNum) + node[i+1:len(node)]
 
-#             # #print(numb)
-#             # for combo in combs:
-#             #     #print(combo," and int ",int("".join(map(str, combo))))
-#             #     if int("".join(map(str, combo))) > int(short) and inOrder(combo):
-#             #         #print("\t\tNot vaild!")
-#             #         validInversion = False
-#             #         break
-#             """
-#             for i in range(len(short)-1):
-#                 # compare adj number
-#                 if short[i] > short[i+1]:
-#                     continue
-#                 # If the next number in the sequence is greater than the current one
-#                 else:
-#                     # Build the new perm that will be lex greater then the current one
-#                     new = short[:max(i,0)]
-#                     new += short[i+1]
-#                     new += short[i]
-#                     new += short[i+2:]
+        # If we are transtioning between out and in order
+        # then we need to make sure that this is the right
+        # time to do so
+        if inOrder(par):
+            # Strip out the last symbol
+            short = par[:len(par)-1]
 
-#                     print(new)
-#                     # If this new perm is in order then we can't swtich from out of
-#                     # order to in order and we need to appily the next rule to find the parent
-#                     if inOrder(new):
-#                         print(new,"is not in order")
-#                         validInversion = False
-#                     else:
-#                         continue
-#             """
+            # Now we want the lex greatest IN order combonation
+            # of these numbers 
+            validInversion = True
+
+            # numb = [int(s) for s in list(short)]
+            # numb.sort()
+            # combs = itertools.permutations(numb, len(short))
+
+            # #print(numb)
+            # for combo in combs:
+            #     #print(combo," and int ",int("".join(map(str, combo))))
+            #     if int("".join(map(str, combo))) > int(short) and inOrder(combo):
+            #         #print("\t\tNot vaild!")
+            #         validInversion = False
+            #         break
+            """
+            for i in range(len(short)-1):
+                # compare adj number
+                if short[i] > short[i+1]:
+                    continue
+                # If the next number in the sequence is greater than the current one
+                else:
+                    # Build the new perm that will be lex greater then the current one
+                    new = short[:max(i,0)]
+                    new += short[i+1]
+                    new += short[i]
+                    new += short[i+2:]
+
+                    print(new)
+                    # If this new perm is in order then we can't swtich from out of
+                    # order to in order and we need to appily the next rule to find the parent
+                    if inOrder(new):
+                        print(new,"is not in order")
+                        validInversion = False
+                    else:
+                        continue
+            """
             
 
-#             #print(short)
-#             if validInversion:
-#                 return par
+            #print(short)
+            if validInversion:
+                return par
             
-#             return None
-#         return par
+            return None
+        return par
 
 
 if __name__ == '__main__':
