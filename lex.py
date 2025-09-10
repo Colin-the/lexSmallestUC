@@ -57,43 +57,105 @@ def generate_lex_uc(n):
     full_seq = prefix + circuit
     return ''.join(map(str, full_seq))
 
-def display_shorthand_graph(n, uc_sequence="", interval=300):
+def generate_lex_uc_with_events(n):
     """
-    Draws the directed graph of (n-2)-tuples → (n-2)-tuples for shorthand permutations
-    using pure matplotlib (no NetworkX).
+    Run Hierholzer's algorithm but record a list of events to animate:
+      - ('push', node)
+      - ('take', from_node, to_node)
+      - ('pop', node)
+    After the traversal we append a sequence of ('highlight_cycle_edge', (u,v)) events
+    that show the final cycle edges in order.
+    Returns (uc_string, events, final_windows)
     """
+    if n == 1:
+        return "1", [('push', (1,))], [(1,)]
+    if n == 2:
+        return "12", [('push', (1,)), ('take', (1,), (2,)), ('push', (2,)), ('pop', (2,)), ('pop', (1,))], [(1,), (2,)]
 
-    if isinstance(uc_sequence, str):
-        seq = [int(ch) for ch in uc_sequence]
-    else:
-        seq = list(uc_sequence)
-    
-    # Build the list of window-vertices visited:
+    edges = list(itertools.permutations(range(1, n+1), n-1))
+    adj = {}
+    for edge in edges:
+        v = edge[:-1]
+        a = edge[-1]
+        adj.setdefault(v, []).append(a)
+    for v in adj:
+        adj[v].sort()
+
+    start = tuple(range(1, n-1))
+    path = [start]
+    edge_stack = []
+    circuit = []
+    events = []
+    events.append(('push', start))
+
+    # Hierholzer with events
+    while path:
+        v = path[-1]
+        if adj[v]:
+            a = adj[v].pop(0)
+            u = v[1:] + (a,)
+            edge_stack.append(a)
+            events.append(('take', v, u))
+            path.append(u)
+            events.append(('push', u))
+        else:
+            popped = path.pop()
+            events.append(('pop', popped))
+            if edge_stack:
+                circuit.append(edge_stack.pop())
+
+    circuit.reverse()
+    prefix = list(start)
+    full_seq = prefix + circuit
+    uc_str = ''.join(map(str, full_seq))
+
+    # Build the windows (k = n-2) for the final cycle
     k = n - 2
+    seq = [int(ch) for ch in uc_str]
     windows = []
-    # first window: first k symbols
     windows.append(tuple(seq[:k]))
     for i in range(len(seq) - k):
         win = windows[-1][1:] + (seq[i + k],)
         windows.append(win)
 
-        
-    # 1) Generate vertices as all (n-2)-tuples
-    vertices = list(itertools.permutations(range(1, n+1), n-2))
+    # Build final cycle edges (pairs of consecutive windows)
+    final_edges = []
+    for i in range(len(windows) - 1):
+        final_edges.append((windows[i], windows[i + 1]))
+    # For completeness, the produced uc is of length n! so windows cover the full cycle.
+
+    # append events to highlight the final cycle edges one-by-one
+    for e in final_edges:
+        events.append(('highlight_cycle_edge', e))
+
+    return uc_str, events, windows
+
+def display_shorthand_graph(n, uc_sequence="", interval=350):
+    """
+    Draws the directed graph of (n-2)-tuples → (n-2)-tuples.
+    Animates according to the events produced by generate_lex_uc_with_events.
+    """
+
+    # Get uc and events
+    uc, events, final_windows = generate_lex_uc_with_events(n)
+
+    # Build vertex list (all (n-2)-tuples)
+    k = n - 2
+    vertices = list(itertools.permutations(range(1, n+1), k))
     N = len(vertices)
-    
-    # 2) Assign each vertex a position on the unit circle
+
+    # positions on unit circle
     pos = {
         v: (math.cos(2*math.pi*i / N), math.sin(2*math.pi*i / N))
         for i, v in enumerate(vertices)
     }
-    
-    # 3) Create plot
+
+    # create plot
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_title(f"Shorthand-Permutation Graph for n={n}")
     ax.axis('off')
-    
-    # 4) Draw edges as arrows
+
+    # draw arrows for all possible edges (v -> u where u = v[1:]+(a,))
     edge_artists = {}
     for v, (x, y) in pos.items():
         missing = set(range(1, n+1)) - set(v)
@@ -103,150 +165,122 @@ def display_shorthand_graph(n, uc_sequence="", interval=300):
             arrow = ax.annotate(
                 "",
                 xy=(xu, yu), xytext=(x, y),
-                arrowprops=dict(arrowstyle="->", lw=1, color="black", shrinkA=5, shrinkB=5)
+                arrowprops=dict(arrowstyle="->", lw=1, color="lightgray", shrinkA=5, shrinkB=5)
             )
             edge_artists[(v, u)] = arrow
-    
-    # 5) Draw nodes and labels
+
+    # nodes
     nodes = {}
-    for v, (x, y) in pos.items():
-        #print(x," ",y," ",v)
-        if v == vertices[0]:
-            circ = ax.scatter(x, y, s=100, color='green', edgecolor='black')
-        else:
-            circ =  ax.scatter(x, y, s=100, color='white', edgecolor='black')
-        ax.text(x, y+0.075, str(v), ha='center', va='center', fontsize=8)
+    for i, (v, (x, y)) in enumerate(pos.items()):
+        # initial coloring: white, except maybe the first vertex
+        circ = ax.scatter(x, y, s=120, facecolor='white', edgecolor='black', zorder=3)
+        ax.text(x, y + 0.08, str(v), ha='center', va='center', fontsize=8)
         nodes[v] = circ
 
-    def init():
-        for circ in nodes.values():
-            circ.set_facecolor('white')
-        for arrow in edge_artists.values():
-            arrow.arrow_patch.set_color('black')
-        return list(nodes.values()) + list(edge_artists.values())
-    
-    # Animation update: for each frame, highlight node and edge
+    # Legend
+    legend_patches = [
+        mpatches.Patch(facecolor='green', edgecolor='black', label='On current path'),
+        mpatches.Patch(facecolor='orange', edgecolor='black', label='Backtracked (popped)'),
+        mpatches.Patch(facecolor='white', edgecolor='black', label='Unvisited')
+    ]
+    edge_patches = [
+        mpatches.Patch(color='red', label='Edge taken'),
+        mpatches.Patch(color='magenta', label='Final cycle edge')
+    ]
+    ax.legend(handles=legend_patches + edge_patches, loc='upper right', fontsize='small')
+
+    def interpret_events_up_to(idx):
+        """
+        Simulate events[0:idx] while also tracking the edge-stack so that edges
+        that are taken then later backtracked (popped) are returned as NOT taken.
+        Returns:
+        - current_path_nodes (set)
+        - popped_nodes (set)
+        - taken_edges (set)          # only edges currently active on the path
+        - highlighted_cycle (list)   # final-cycle edges highlighted so far (preserve order)
+        """
+        path_stack = []
+        popped = set()
+
+        # taken_edges: set of edges currently 'active' (coloured red)
+        taken_edges = set()
+        # taken_stack: ordered stack of edges as they were taken, to simulate pops/backtrack
+        taken_stack = []
+
+        highlighted_cycle = []
+
+        for e in events[:idx]:
+            if e[0] == 'push':
+                _, node = e
+                path_stack.append(node)
+
+            elif e[0] == 'take':
+                # record the taken edge and push it onto the taken_stack
+                _, a, b = e
+                taken_stack.append((a, b))
+                taken_edges.add((a, b))
+
+            elif e[0] == 'pop':
+                _, node = e
+                # pop node from simulated path stack if it matches
+                if path_stack and path_stack[-1] == node:
+                    path_stack.pop()
+                popped.add(node)
+
+                # when a pop occurs, Hierholzer pops an edge from the edge stack too
+                # if there is one; that edge should no longer be treated as "active".
+                if taken_stack:
+                    last_edge = taken_stack.pop()
+                    if last_edge in taken_edges:
+                        taken_edges.remove(last_edge)
+
+            elif e[0] == 'highlight_cycle_edge':
+                _, edge = e
+                highlighted_cycle.append(edge)
+
+        return set(path_stack), popped, taken_edges, highlighted_cycle
+
+
+    # Animation update
+    total_frames = len(events) + 10  # little hang at end
     def update(frame):
-        # Reset previous highlights
-        if frame > 0:
-            prev_node = windows[frame - 1]
-            nodes[prev_node].set_facecolor('white')
-            
-            prev_edge = (windows[frame - 1], windows[frame])
-            edge_artists[prev_edge].arrow_patch.set_color('black')
-        
-        # Highlight current node
-        curr_node = windows[frame]
-        nodes[curr_node].set_facecolor('green')
-        
-        # Highlight current edge (if not the first)
-        if frame > 0:
-            curr_edge = (windows[frame - 1], windows[frame])
-            edge_artists[curr_edge].arrow_patch.set_color('red')
-        
-        return [nodes[curr_node], edge_artists.get((windows[frame - 1], windows[frame]), None)]
-    
-    # ani = animation.FuncAnimation(
-    #     fig, update, frames=len(windows),
-    #     init_func=init, blit=True, interval=interval, repeat=False
-    # )
-    plt.show()
+        # compute state up to this frame
+        path_nodes, popped_nodes, taken_edges, highlighted_cycle = interpret_events_up_to(frame)
 
-def build_discovery_tree_and_cycle(n):
-    """
-    Returns:
-      parent: dict mapping each (n-1)-tuple window u to its parent (n-2)-tuple v
-      cycle:  list of symbols of the Eulerian circuit (length = n!)
-    """
-    symbols = list(range(1, n+1))
-    k = n - 1
-    vert_len = k - 1  # = n-2
+        # Reset visuals
+        for v, circ in nodes.items():
+            if v in path_nodes:
+                circ.set_facecolor('green')
+            elif v in popped_nodes:
+                circ.set_facecolor('orange')
+            else:
+                circ.set_facecolor('white')
 
-    # 1) Build adjacency: each (n-2)-tuple -> sorted list of the missing symbols
-    adj = {
-        v: sorted([a for a in symbols if a not in v])
-        for v in permutations(symbols, vert_len)
-    }
+        # edges
+        for (u, v), arrow in edge_artists.items():
+            # default appearance
+            arrow.arrow_patch.set_color('lightgray')
+            arrow.arrow_patch.set_linewidth(1.0)
 
-    # 2) Initialize Hierholzer’s structures + parent‑tracking
-    start = tuple(symbols[:vert_len])  # e.g. (1,2,...,n-2)
-    stack      = [start]               # current path of vertices (each len n-2)
-    edge_stack = []                    # symbols of outgoing edges we’ve taken
-    circuit    = []                    # will collect edges (in reverse)
-    seen_u     = set()                 # which (n-1)-windows we’ve discovered
-    parent     = {}                    # parent[u] = v
+        # color edges that were taken as red
+        for e in taken_edges:
+            if e in edge_artists:
+                edge_artists[e].arrow_patch.set_color('red')
+                edge_artists[e].arrow_patch.set_linewidth(1.5)
 
-    # 3) Traverse the graph
-    while stack:
-        v = stack[-1]
-        if adj[v]:
-            # take the lex‑smallest unused symbol from v
-            a = adj[v].pop(0)
-            u = v + (a,)           # this is a new (n-1)-tuple “window”
-            if u not in seen_u:
-                seen_u.add(u)
-                parent[u] = v     # record discovery parent
-            # step to the next vertex = last (n-2) entries of u
-            stack.append(u[1:])
-            edge_stack.append(a)
-        else:
-            # dead end: retreat
-            stack.pop()
-            if edge_stack:
-                circuit.append(edge_stack.pop())
+        # highlight final cycle edges (magenta, thicker)
+        for e in highlighted_cycle:
+            if e in edge_artists:
+                edge_artists[e].arrow_patch.set_color('magenta')
+                edge_artists[e].arrow_patch.set_linewidth(2.5)
+        # return artists (for blitting False is fine)
+        artists = list(nodes.values()) + list(edge_artists.values())
+        return artists
 
-    # 4) Reverse to get the forward cycle of symbols
-    cycle = circuit[::-1]
-    assert len(cycle) == factorial(n), (
-        f"Expected cycle length {factorial(n)}, got {len(cycle)}"
+    ani = animation.FuncAnimation(
+        fig, update, frames=total_frames,
+        interval=interval, blit=False, repeat=False
     )
-
-    return parent, cycle
-
-
-def plot_discovery_tree(parent):
-    """
-    Plots the discovery tree given a parent mapping child->parent of same window size.
-    """
-    # Find root (window with no parent)
-    # For universal cycle, start window is the root
-    root = next(w for w in parent.values() if w not in parent)
-
-    # Compute depth of each node
-    depth = {root: 0}
-    print(depth)
-    for child in parent:
-        print("child:", child)
-        depth[child] = depth[parent[child]] + 1
-
-    # Group nodes by depth
-    levels = {}
-    for node, d in depth.items():
-        levels.setdefault(d, []).append(node)
-    for d in levels:
-        levels[d].sort()
-
-    # Assign positions
-    positions = {}
-    for d, nodes in levels.items():
-        count = len(nodes)
-        for i, node in enumerate(nodes):
-            positions[node] = (i - (count-1)/2, -d)
-
-    # Plot edges and nodes
-    fig, ax = plt.subplots(figsize=(10, 6))
-    for child, par in parent.items():
-        x0, y0 = positions[par]
-        x1, y1 = positions[child]
-        ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
-                    arrowprops=dict(arrowstyle="->", lw=1))
-    for node, (x, y) in positions.items():
-        ax.scatter(x, y, s=100, color='black')
-        ax.text(x, y, "".join(map(str, node)),
-                ha='center', va='center', color='white', fontsize=8,
-                bbox=dict(boxstyle="circle,pad=0.3", fc="black"))
-    ax.axis('off')
-    plt.tight_layout()
     plt.show()
 
 if __name__ == "__main__":
@@ -255,61 +289,4 @@ if __name__ == "__main__":
     uc = uc[:math.factorial(n)]
     print("n=",n," →", uc)
 
-    #dot_output = display_shorthand_graph(n, uc_sequence=uc, interval=700)
-
-    parent, cycle = build_discovery_tree_and_cycle(n)
-    print(parent)
-    plot_discovery_tree(parent)
-
-    print(f"Lex‑smallest UC for (n−1)-perms of {{1..{n}}} has length {len(cycle)}")
-    print(cycle)
-    
-    # 123124132134214324314234
-    # 123 124 132 134 214 324 314 234
-
-    # 123 124 132 134 214 234
-
-    # [3, 1, 2, 4, 1, 3, 2, 1, 3, 4, 2, 1, 4, 3, 2, 4, 3, 1, 4, 2, 3, 4, 1, 2]
-
-    # 123124132134214324314234
-
-    # 123412351243124513241325134213452135214321452314231524153215342514352435142531453245312541354215432543154235412534152345
-    # 1234 1235 1243 1245 1324 1325 1342 1345 2135 2143 2145 2314 2315 2415 3215 3425 1435 2435 1425 3145 3245 3125 4135 4215 4325 4315 4235 4125 3415 2345
-
-    # 1234 1235 1243 1245 1325
-
-
-    
-
-
-    # this is the out of order part of the tree
-    # 2415 3215 3425 1435 2435 1425 3145 3245 3125 4135 4215 4325 4315 4235 4125 3415 2345
-
-
-
-    # parent(2415) = e{2435, 3415}
-
-
-    # 241 321 342 143 243 142 314 324 312 413 421 432 431 423 412 341 234
-    # 124 132 234 143 243 142 143 243 123 134 142 243 143 234 124 134 234
-
-    # parent(2415) = 2345 swap 4 and 1 then rase 1 to it's max (3)
-
-    """
-    Rule:
-        1) if the string is in order then appily raise the right most non-max sysbol to it's max postion 
-        2) if the string is not in order then decrement the left most out of order symbol
-
-        "out of order" meaning a_i > i + 1
-    
-        
-    4125->3415->2345
-    4125->2415->3415->1345->2345
-
-
-    423 5
-
-    4315->2435
-    you rotate the first 3 symbols and then add 1 to the first one
-    """
-    
+    display_shorthand_graph(n, interval=700)
