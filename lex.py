@@ -1,6 +1,7 @@
 import collections
 import itertools
 import math
+import random
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.animation as animation
@@ -56,6 +57,86 @@ def generate_lex_uc(n):
     prefix = list(start)
     full_seq = prefix + circuit
     return ''.join(map(str, full_seq))
+
+def compute_force_layout(vertices, edge_list, radius=1.0, iterations=120, area_scale=1.0):
+    """
+    Very small, self-contained force-directed layout for small graphs.
+    vertices: list of vertex keys
+    edge_list: list of (u,v) edges (directed) to apply attractive forces along
+    radius: target radius scale (final positions normalized to roughly this)
+    iterations: number of relaxation steps (small graphs converge fast)
+    """
+    import random
+    # initial positions on circle (good starting point)
+    N = len(vertices)
+    pos = {v: [math.cos(2*math.pi*i/N), math.sin(2*math.pi*i/N)] for i,v in enumerate(vertices)}
+
+    # parameters (tweak for taste)
+    k = math.sqrt(area_scale * (radius*radius) / max(1, N))  # ideal pairwise distance
+    temperature = radius * 0.6
+
+    for it in range(iterations):
+        # repulsive forces
+        disp = {v: [0.0, 0.0] for v in vertices}
+        for i in range(N):
+            vi = vertices[i]
+            xi, yi = pos[vi]
+            for j in range(i+1, N):
+                vj = vertices[j]
+                xj, yj = pos[vj]
+                dx = xi - xj
+                dy = yi - yj
+                dist = math.hypot(dx, dy) + 1e-6
+                # repulsive force magnitude
+                fr = (k*k) / dist
+                ux = dx / dist
+                uy = dy / dist
+                disp[vi][0] += ux * fr
+                disp[vi][1] += uy * fr
+                disp[vj][0] -= ux * fr
+                disp[vj][1] -= uy * fr
+
+        # attractive forces (along directed edges; treat as undirected for attraction)
+        for (u, v) in edge_list:
+            xu, yu = pos[u]
+            xv, yv = pos[v]
+            dx = xu - xv
+            dy = yu - yv
+            dist = math.hypot(dx, dy) + 1e-6
+            fa = (dist*dist) / k
+            ux = dx / dist
+            uy = dy / dist
+            # pull u towards v and v towards u (symmetric)
+            disp[u][0] -= ux * fa
+            disp[u][1] -= uy * fa
+            disp[v][0] += ux * fa
+            disp[v][1] += uy * fa
+
+        # apply displacements with a cooling factor
+        for v in vertices:
+            dx, dy = disp[v]
+            disp_len = math.hypot(dx, dy)
+            if disp_len > 0:
+                # limit by temperature
+                scale = min(disp_len, temperature) / disp_len
+                pos[v][0] += dx * scale
+                pos[v][1] += dy * scale
+
+        # cool
+        temperature *= 0.95
+
+    # normalize distances to roughly 'radius'
+    # compute centroid and scale so average distance ~ radius
+    cx = sum(p[0] for p in pos.values()) / N
+    cy = sum(p[1] for p in pos.values()) / N
+    avg_dist = sum(math.hypot(p[0]-cx, p[1]-cy) for p in pos.values()) / N
+    if avg_dist > 1e-6:
+        scale = radius / avg_dist
+        for v in pos:
+            pos[v][0] = (pos[v][0] - cx) * scale
+            pos[v][1] = (pos[v][1] - cy) * scale
+
+    return {v: tuple(pos[v]) for v in vertices}
 
 def generate_lex_uc_with_events(n):
     """
@@ -130,7 +211,7 @@ def generate_lex_uc_with_events(n):
 
     return uc_str, events, windows
 
-def display_shorthand_graph(n, uc_sequence="", interval=350):
+def display_shorthand_graph(n, uc_sequence="", interval=350, fancy = False, filename = "traversal_animation.gif"):
     """
     Draws the directed graph of (n-2)-tuples → (n-2)-tuples.
     Animates according to the events produced by generate_lex_uc_with_events.
@@ -138,44 +219,117 @@ def display_shorthand_graph(n, uc_sequence="", interval=350):
 
     # Get uc and events
     uc, events, final_windows = generate_lex_uc_with_events(n)
-
-    # Build vertex list (all (n-2)-tuples)
     k = n - 2
-    vertices = list(itertools.permutations(range(1, n+1), k))
-    N = len(vertices)
-
-    # positions on unit circle
-    pos = {
-        v: (math.cos(2*math.pi*i / N), math.sin(2*math.pi*i / N))
-        for i, v in enumerate(vertices)
-    }
-
+    
     # create plot
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_title(f"Shorthand-Permutation Graph for n={n}")
     ax.axis('off')
+    
+    if n == 3 or fancy:  
+        vertices = list(itertools.permutations(range(1, n+1), k))
+        N = len(vertices)
 
-    # draw arrows for all possible edges (v -> u where u = v[1:]+(a,))
-    edge_artists = {}
-    for v, (x, y) in pos.items():
-        missing = set(range(1, n+1)) - set(v)
-        for a in missing:
-            u = v[1:] + (a,)
-            xu, yu = pos[u]
-            arrow = ax.annotate(
-                "",
-                xy=(xu, yu), xytext=(x, y),
-                arrowprops=dict(arrowstyle="->", lw=1, color="lightgray", shrinkA=5, shrinkB=5)
-            )
-            edge_artists[(v, u)] = arrow
+        # choose layout method: for very small graphs use force-directed to spread nodes
+        if N <= 6:
+            # build edge list for attractive forces (treat missing elements same as earlier)
+            tmp_edges = []
+            for v in vertices:
+                missing = set(range(1, n+1)) - set(v)
+                for a in missing:
+                    u = v[1:] + (a,)
+                    tmp_edges.append((v, u))
+            # small tweak: make radius slightly larger for n=3 so nodes are more spread
+            base_radius = 1.8 if n == 3 else 1.4
+            pos = compute_force_layout(vertices, tmp_edges, radius=base_radius, iterations=140)
+        else:
+            # default circular layout for larger graphs
+            pos = { v: (math.cos(2*math.pi*i / N), math.sin(2*math.pi*i / N)) for i, v in enumerate(vertices) }
 
-    # nodes
-    nodes = {}
-    for i, (v, (x, y)) in enumerate(pos.items()):
-        # initial coloring: white, except maybe the first vertex
-        circ = ax.scatter(x, y, s=120, facecolor='white', edgecolor='black', zorder=3)
-        ax.text(x, y + 0.08, str(v), ha='center', va='center', fontsize=8)
-        nodes[v] = circ
+        # draw nodes
+        nodes = {}
+        for i, (v, (x, y)) in enumerate(pos.items()):
+            circ = ax.scatter(x, y, s=120, facecolor='white', edgecolor='black', zorder=3)
+            ax.text(x, y + 0.08, str(v), ha='center', va='center', fontsize=8)
+            nodes[v] = circ
+
+        # draw arrows but use curved connectionstyle to avoid exact overlaps
+        from matplotlib.patches import FancyArrowPatch
+
+        edge_artists = {}
+        # group edges by pair to assign different radii when many edges share the same straight line
+        pair_counts = {}
+        for v in vertices:
+            missing = set(range(1, n+1)) - set(v)
+            for a in missing:
+                u = v[1:] + (a,)
+                pair_counts.setdefault((v,u), 0)
+                pair_counts[(v,u)] += 1
+
+        # build an ordering index per pair (so we can alternate curvature)
+        pair_index = {}
+        for (v, u) in pair_counts:
+            pair_index[(v, u)] = 0
+
+        for v, (x, y) in pos.items():
+            missing = set(range(1, n+1)) - set(v)
+            for a in missing:
+                u = v[1:] + (a,)
+                xu, yu = pos[u]
+
+                # assign a curvature 'rad' depending on how many times this pair has been drawn
+                idx = pair_index[(v, u)]
+                pair_index[(v, u)] = idx + 1
+
+                # alternate sign and scale by index to separate parallel edges (if any)
+                sign = 1 if (idx % 2 == 0) else -1
+                rad_base = 0.12  # adjust to taste
+                rad = sign * (1 + idx//2) * rad_base
+
+                arrow = FancyArrowPatch(
+                    (x, y), (xu, yu),
+                    connectionstyle=f"arc3,rad={rad}",
+                    arrowstyle='-|>', mutation_scale=12,
+                    linewidth=1.0,
+                    color="lightgray",
+                    zorder=1
+                )
+                ax.add_patch(arrow)
+                edge_artists[(v, u)] = arrow
+
+    else:
+        vertices = list(itertools.permutations(range(1, n+1), k))
+        N = len(vertices)
+
+        # positions on unit circle
+        pos = {
+            v: (math.cos(2*math.pi*i / N), math.sin(2*math.pi*i / N))
+            for i, v in enumerate(vertices)
+        }
+
+        
+
+        # draw arrows for all possible edges (v -> u where u = v[1:]+(a,))
+        edge_artists = {}
+        for v, (x, y) in pos.items():
+            missing = set(range(1, n+1)) - set(v)
+            for a in missing:
+                u = v[1:] + (a,)
+                xu, yu = pos[u]
+                arrow = ax.annotate(
+                    "",
+                    xy=(xu, yu), xytext=(x, y),
+                    arrowprops=dict(arrowstyle="->", lw=1, color="lightgray", shrinkA=5, shrinkB=5)
+                )
+                edge_artists[(v, u)] = arrow
+
+        # nodes
+        nodes = {}
+        for i, (v, (x, y)) in enumerate(pos.items()):
+            # initial coloring: white, except maybe the first vertex
+            circ = ax.scatter(x, y, s=120, facecolor='white', edgecolor='black', zorder=3)
+            ax.text(x, y + 0.08, str(v), ha='center', va='center', fontsize=8)
+            nodes[v] = circ
 
     # Legend
     legend_patches = [
@@ -187,7 +341,7 @@ def display_shorthand_graph(n, uc_sequence="", interval=350):
         mpatches.Patch(color='red', label='Edge taken'),
         mpatches.Patch(color='magenta', label='Final cycle edge')
     ]
-    ax.legend(handles=legend_patches + edge_patches, loc='upper right', fontsize='small')
+    ax.legend(handles=legend_patches + edge_patches, loc='upper left', bbox_to_anchor=(0.8, 1.12), bbox_transform=ax.transAxes, fontsize='small')
 
     def interpret_events_up_to(idx):
         """
@@ -247,7 +401,7 @@ def display_shorthand_graph(n, uc_sequence="", interval=350):
         # compute state up to this frame
         path_nodes, popped_nodes, taken_edges, highlighted_cycle = interpret_events_up_to(frame)
 
-        # Reset visuals
+        # Reset visuals for nodes
         for v, circ in nodes.items():
             if v in path_nodes:
                 circ.set_facecolor('green')
@@ -256,37 +410,70 @@ def display_shorthand_graph(n, uc_sequence="", interval=350):
             else:
                 circ.set_facecolor('white')
 
-        # edges
-        for (u, v), arrow in edge_artists.items():
-            # default appearance
-            arrow.arrow_patch.set_color('lightgray')
-            arrow.arrow_patch.set_linewidth(1.0)
+        # Helper to set color/linewidth for either FancyArrowPatch or annotate() result
+        def set_arrow_look(arrow_obj, color, lw):
+            # FancyArrowPatch has set_color / set_linewidth
+            if hasattr(arrow_obj, "set_color") and hasattr(arrow_obj, "set_linewidth"):
+                try:
+                    arrow_obj.set_color(color)
+                    arrow_obj.set_linewidth(lw)
+                except Exception:
+                    # defensive: some matplotlib builds behave slightly differently
+                    pass
+            # annotate() returns an Annotation with .arrow_patch attribute (a FancyArrowPatch)
+            elif hasattr(arrow_obj, "arrow_patch") and arrow_obj.arrow_patch is not None:
+                try:
+                    arrow_obj.arrow_patch.set_color(color)
+                    arrow_obj.arrow_patch.set_linewidth(lw)
+                except Exception:
+                    pass
+            else:
+                # last resort: try to set properties via setp (very defensive)
+                try:
+                    import matplotlib as mpl
+                    mpl.pyplot.setp(arrow_obj, color=color, linewidth=lw)
+                except Exception:
+                    pass
 
-        # color edges that were taken as red
+        # Reset all edges to default appearance
+        for (u, v), arrow in edge_artists.items():
+            set_arrow_look(arrow, 'lightgray', 1.0)
+
+        # Color edges that are currently taken (active on stack) as red
         for e in taken_edges:
             if e in edge_artists:
-                edge_artists[e].arrow_patch.set_color('red')
-                edge_artists[e].arrow_patch.set_linewidth(1.5)
+                set_arrow_look(edge_artists[e], 'red', 1.5)
 
-        # highlight final cycle edges (magenta, thicker)
+        # Highlight final cycle edges (magenta, thicker)
         for e in highlighted_cycle:
             if e in edge_artists:
-                edge_artists[e].arrow_patch.set_color('magenta')
-                edge_artists[e].arrow_patch.set_linewidth(2.5)
-        # return artists (for blitting False is fine)
+                set_arrow_look(edge_artists[e], 'magenta', 2.5)
+
+        # return artists (nodes + edges). For annotations/fancy patches both are artists.
         artists = list(nodes.values()) + list(edge_artists.values())
         return artists
+
 
     ani = animation.FuncAnimation(
         fig, update, frames=total_frames,
         interval=interval, blit=False, repeat=False
     )
+    fps = 1000.0 / interval  # frames per second (interval is in ms)
+
+    try:
+        # use PillowWriter
+        writer = animation.PillowWriter(fps=fps)
+        ani.save(filename, writer=writer, dpi=80)
+    except Exception as e:
+        print("Failed to save GIF:", e)
+
+
     plt.show()
 
 if __name__ == "__main__":
-    n = 4
+    n = 6
     uc = generate_lex_uc(n)
     uc = uc[:math.factorial(n)]
     print("n=",n," →", uc)
 
-    display_shorthand_graph(n, interval=700)
+    #display_shorthand_graph(n, interval=700)
